@@ -1,5 +1,5 @@
 # SmartTyper
-Writing is an integral part of using computers. However, it's possible for each and every person to mistype occasionally, and there are various reasons for this.
+Writing is an integral part of using computers in our daily lives. Nevertheless, despite being accustomed to keyboard layouts, it's possible for each and every person to mistype occasionally, and there are various reasons for this.
 SmartTyper's main goal is to fix typos within any selected text using a tiny local LLM (Large Language Model).
 Alternatively, SmartTyper has a separate but logically adjacent function, which I've titled SmartEmojis.
 
