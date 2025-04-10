@@ -1,27 +1,88 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Threading.Tasks; // Needed for Task.Delay
+using System.Threading.Tasks;
 using System.Windows.Forms;
-using NHotkey; // Added for Hotkeys
-using NHotkey.WindowsForms; // Added for Hotkeys
-using WindowsInput; // Added for Input Simulation
-using WindowsInput.Native; // Added for VirtualKeyCode
+using NHotkey;
+using NHotkey.WindowsForms;
+//using WindowsInput; // No longer strictly needed if SendInput works for everything
+//using WindowsInput.Native; // No longer strictly needed
+using System.Runtime.InteropServices; // Needed for P/Invoke DllImport
 
 namespace SmartTyper
 {
     public partial class Form1 : Form
     {
-        // State variable to track if the feature is ON or OFF
+        // P/Invoke Definitions (as listed above)
+        #region P/Invoke Definitions for SendInput
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct MOUSEINPUT
+        {
+            public int dx;
+            public int dy;
+            public uint mouseData;
+            public uint dwFlags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct KEYBDINPUT
+        {
+            public ushort wVk;
+            public ushort wScan;
+            public uint dwFlags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct HARDWAREINPUT
+        {
+            public uint uMsg;
+            public ushort wParamL;
+            public ushort wParamH;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        internal struct INPUT_UNION
+        {
+            [FieldOffset(0)] public MOUSEINPUT mi;
+            [FieldOffset(0)] public KEYBDINPUT ki;
+            [FieldOffset(0)] public HARDWAREINPUT hi;
+        }
+
+        internal struct INPUT
+        {
+            public uint type; // INPUT_KEYBOARD = 1
+            public INPUT_UNION U;
+        }
+
+        // Import the SendInput function from user32.dll
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+        // Import GetMessageExtraInfo for dwExtraInfo (recommended)
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetMessageExtraInfo();
+
+        // Constants for keyboard events
+        private const uint INPUT_KEYBOARD = 1;
+        private const uint KEYEVENTF_KEYDOWN = 0x0000; // Key down flag
+        private const uint KEYEVENTF_KEYUP = 0x0002; // Key up flag
+        private const ushort VK_LCONTROL = 0xA2; // Left Control key code
+        private const ushort VK_KEY_C = 0x43; // 'C' key code
+        private const ushort VK_KEY_V = 0x56; // 'V' key code
+
+        #endregion
+
+        // State variable
         private bool emojiReplacementState = false;
-        // Instance of the InputSimulator for sending keystrokes
-        private InputSimulator inputSimulator = new InputSimulator();
-        // Name for our hotkey registration
         private const string HotkeyName = "SmartEmojiTrigger";
 
-        // The dictionary mapping text smilies to Unicode emojis
+        // Emoji dictionary
         private Dictionary<string, string> emojis = new Dictionary<string, string>
-            {
-                // --- Your comprehensive emoji list goes here ---
+            { /* --- Your full emoji list here --- */
                 { ":)", "🙂" }, { ":D", "😄" }, { ":(", "🙁" }, { ":rofl:", "🤣" },
                 { "^^'", "😅" }, { ":sweat:", "😅" }, { ":>", "😊" }, { ":blush:", "😊" },
                 { "!!!", "😍" }, { ":heartseyes:", "😍" }, { ":P", "😋" }, { ":tongue:", "😋" },
@@ -36,38 +97,74 @@ namespace SmartTyper
                 { ":wink:", "😉" }, { ":kissheart:", "😘" }, { ":scream:", "😱" }, { ":shock:", "😱"},
                 { ":sweatsmile:", "😅" }, { ":O", "😮" }, { ":o", "😮" }, { "xD", "😆" },
                 { "XD", "😆" }, { "o.O", "😳" }, { "O.o", "😳" }
-                // --- End of emoji list ---
             };
 
         public Form1()
         {
             InitializeComponent();
-            SetupHotkey(); // Register the hotkey when the form starts
-            UpdateUIState(); // Set initial text for button and label
+            SetupHotkey();
+            UpdateUIState();
         }
 
-        // Registers the global hotkey
         private void SetupHotkey()
         {
-            // Using CTRL + Space as an example hotkey. Choose what works best for you!
-            // Ensure the key combination isn't commonly used by other apps.
-            // Common modifiers: Keys.Control, Keys.Alt, Keys.Shift, Keys.Win
             try
             {
-                HotkeyManager.Current.AddOrReplace(HotkeyName, Keys.Alt | Keys.Oemtilde, OnHotkeyActivated);
-                Console.WriteLine("Hotkey Alt+` registered successfully.");
+                HotkeyManager.Current.AddOrReplace(HotkeyName, Keys.Control | Keys.Oemtilde, OnHotkeyActivated);
+                Console.WriteLine("Hotkey CTRL+` registered successfully."); // Update confirmation message
             }
-            catch (HotkeyAlreadyRegisteredException ex)
-            {
-                MessageBox.Show($"Hotkey already registered, possibly by another application or instance. {ex.Message}", "Hotkey Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to register hotkey. {ex.Message}", "Hotkey Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            catch (HotkeyAlreadyRegisteredException ex) { /* ... error handling ... */ }
+            catch (Exception ex) { /* ... error handling ... */ }
         }
 
-        // This method is called when the global hotkey (CTRL+Space) is pressed
+        // Helper function to simulate a single key press (down and up)
+        private void SimulateKeyPress(ushort vkCode)
+        {
+            INPUT[] inputs = new INPUT[2];
+
+            // Key Down
+            inputs[0] = new INPUT();
+            inputs[0].type = INPUT_KEYBOARD;
+            inputs[0].U.ki.wVk = vkCode;
+            inputs[0].U.ki.dwFlags = KEYEVENTF_KEYDOWN;
+            inputs[0].U.ki.dwExtraInfo = GetMessageExtraInfo();
+
+            // Key Up
+            inputs[1] = new INPUT();
+            inputs[1].type = INPUT_KEYBOARD;
+            inputs[1].U.ki.wVk = vkCode;
+            inputs[1].U.ki.dwFlags = KEYEVENTF_KEYUP;
+            inputs[1].U.ki.dwExtraInfo = GetMessageExtraInfo();
+
+            SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
+        }
+
+        // Helper function to simulate holding a modifier and pressing a key
+        private void SimulateModifiedKeyPress(ushort modifierVkCode, ushort vkCode)
+        {
+            INPUT[] inputs = new INPUT[4];
+            IntPtr extraInfo = GetMessageExtraInfo();
+
+            // Modifier Down
+            inputs[0] = new INPUT { type = INPUT_KEYBOARD };
+            inputs[0].U.ki = new KEYBDINPUT { wVk = modifierVkCode, dwFlags = KEYEVENTF_KEYDOWN, dwExtraInfo = extraInfo };
+
+            // Key Down
+            inputs[1] = new INPUT { type = INPUT_KEYBOARD };
+            inputs[1].U.ki = new KEYBDINPUT { wVk = vkCode, dwFlags = KEYEVENTF_KEYDOWN, dwExtraInfo = extraInfo };
+
+            // Key Up
+            inputs[2] = new INPUT { type = INPUT_KEYBOARD };
+            inputs[2].U.ki = new KEYBDINPUT { wVk = vkCode, dwFlags = KEYEVENTF_KEYUP, dwExtraInfo = extraInfo };
+
+            // Modifier Up
+            inputs[3] = new INPUT { type = INPUT_KEYBOARD };
+            inputs[3].U.ki = new KEYBDINPUT { wVk = modifierVkCode, dwFlags = KEYEVENTF_KEYUP, dwExtraInfo = extraInfo };
+
+            SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
+        }
+
+
         private async void OnHotkeyActivated(object sender, HotkeyEventArgs e)
         {
             Console.WriteLine($"OnHotkeyActivated called! State: {emojiReplacementState}");
@@ -75,153 +172,110 @@ namespace SmartTyper
             e.Handled = true;
 
             string originalClipboardText = null;
-            bool clipboardContainsText = false; // Also good to declare here
+            bool clipboardContainsText = false;
 
             try
             {
                 Console.WriteLine("Hotkey proceeding...");
-
                 bool success = false;
 
-                // 1. Save original clipboard content (if it's text)
+                // 1. Save original clipboard
                 if (Clipboard.ContainsText())
                 {
                     clipboardContainsText = true;
                     originalClipboardText = Clipboard.GetText();
-                    Console.WriteLine($"Original clipboard had text: '{originalClipboardText}'"); // Debug
+                    Console.WriteLine($"Original clipboard had text: '{originalClipboardText}'");
                 }
-                else
-                {
-                    Console.WriteLine("Original clipboard was empty or had non-text content."); // Debug
-                }
-                Clipboard.Clear(); // Clear clipboard before copy attempt
+                else { Console.WriteLine("Original clipboard was empty or had non-text content."); }
+                Clipboard.Clear();
 
-                // 2. Simulate CTRL+C (Copy selected text)
-                /*inputSimulator.Keyboard.KeyDown(VirtualKeyCode.LCONTROL); // Press Left Control
-                await Task.Delay(50); // Small delay between keys
-                inputSimulator.Keyboard.KeyPress(VirtualKeyCode.VK_C); // Press C
-                await Task.Delay(50); // Small delay
-                inputSimulator.Keyboard.KeyUp(VirtualKeyCode.LCONTROL); // Release Left Control
-                Console.WriteLine("Simulated CTRL+C (KeyDown/Up method)"); // Update log message
-                Console.WriteLine("Simulated CTRL+C");*/
+                // 2. Simulate CTRL+C using SendInput
+                SimulateModifiedKeyPress(VK_LCONTROL, VK_KEY_C); // Use the helper
+                Console.WriteLine("Simulated CTRL+C (SendInput method)");
 
-                SendKeys.SendWait("^{c}"); // Send CTRL+C using SendKeys
-                Console.WriteLine("Simulated CTRL+C (SendKeys method)"); // Update log message
+                // 3. Wait for clipboard update (Keep the longer delay for now)
+                await Task.Delay(100); // Delay the task by 100ms
 
-                // 3. Wait LONGER for clipboard to update
-                await Task.Delay(1000); // <--- INCREASED DELAY HERE
-
-                // 4. Read the newly copied text from clipboard
+                // 4. Read clipboard
                 if (Clipboard.ContainsText())
                 {
                     string selectedText = Clipboard.GetText();
-                    Console.WriteLine($"Text copied: '{selectedText}'"); // Should have text now
+                    Console.WriteLine($"Text copied: '{selectedText}'");
 
                     if (!string.IsNullOrEmpty(selectedText))
                     {
-                        // 5. Process text (apply emoji replacements)
+                        // 5. Process text
                         string correctedText = PerformEmojiReplacements(selectedText);
                         Console.WriteLine($"Text corrected: '{correctedText}'");
 
                         if (correctedText != selectedText)
                         {
-                            // 6. Write corrected text back to clipboard
+                            // 6. Write back to clipboard
                             Clipboard.SetText(correctedText);
                             Console.WriteLine("Corrected text set to clipboard.");
+                            await Task.Delay(50); // Delay before paste
 
-                            // Add a small delay BEFORE pasting, sometimes helps
-                            await Task.Delay(50);
-
-                            // 7. Simulate CTRL+V (Paste corrected text)
-                            inputSimulator.Keyboard.ModifiedKeyStroke(VirtualKeyCode.CONTROL, VirtualKeyCode.VK_V);
-                            Console.WriteLine("Simulated CTRL+V");
+                            // 7. Simulate CTRL+V using SendInput
+                            SimulateModifiedKeyPress(VK_LCONTROL, VK_KEY_V); // Use the helper
+                            Console.WriteLine("Simulated CTRL+V (SendInput method)");
                             success = true;
                         }
                         else
                         {
                             Console.WriteLine("No replacements needed.");
-                            // Restore clipboard immediately if no changes
-                            if (clipboardContainsText) Clipboard.SetText(originalClipboardText);
-                            else Clipboard.Clear();
+                            if (clipboardContainsText) Clipboard.SetText(originalClipboardText); else Clipboard.Clear();
                         }
                     }
                     else
                     {
                         Console.WriteLine("Clipboard was empty after copy (selectedText was null/empty).");
-                        if (clipboardContainsText) Clipboard.SetText(originalClipboardText); // Restore
-                        else Clipboard.Clear();
+                        if (clipboardContainsText) Clipboard.SetText(originalClipboardText); else Clipboard.Clear();
                     }
-                }
-                else // This is the path that was likely taken before
-                {
-                    Console.WriteLine("Clipboard did not contain text after copy and delay."); // Updated message
-                    if (clipboardContainsText) Clipboard.SetText(originalClipboardText); // Restore
-                    else Clipboard.Clear();
-                }
-
-                // Play sound based on success
-                if (success)
-                {
-                    System.Media.SystemSounds.Asterisk.Play();
                 }
                 else
                 {
-                    System.Media.SystemSounds.Exclamation.Play();
+                    Console.WriteLine("Clipboard did not contain text after copy and delay.");
+                    if (clipboardContainsText) Clipboard.SetText(originalClipboardText); else Clipboard.Clear();
                 }
 
+                // Play sound
+                if (success) System.Media.SystemSounds.Asterisk.Play();
+                else System.Media.SystemSounds.Exclamation.Play();
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"!!! EXCEPTION in OnHotkeyActivated: {ex.ToString()}");
-                System.Media.SystemSounds.Hand.Play(); // Error sound
-                                                       // Attempt to restore clipboard even on error
                 try
-                {
-                    if (Clipboard.ContainsText() && originalClipboardText != null)
-                    { // Check if originalClipboardText was captured
-                        Clipboard.SetText(originalClipboardText);
-                        Console.WriteLine("Original clipboard restored after exception.");
-                    }
-                    else if (!Clipboard.ContainsText())
-                    {
-                        Clipboard.Clear(); // Ensure it's clear if it was empty
-                    }
+                { // Restore clipboard in catch
+                    if (clipboardContainsText && originalClipboardText != null) Clipboard.SetText(originalClipboardText);
+                    else if (!clipboardContainsText) Clipboard.Clear();
                 }
-                catch (Exception clipEx)
-                {
-                    Console.WriteLine($"Error restoring clipboard after exception: {clipEx.Message}");
-                }
+                catch (Exception clipEx) { Console.WriteLine($"Error restoring clipboard after exception: {clipEx.Message}"); }
+                System.Media.SystemSounds.Hand.Play();
             }
-            // Removed the finally block as restoration is handled within try/catch now
         }
 
-
-        // Performs the emoji replacements on a given string
-        // Now takes input text and returns the modified text
+        // Performs emoji replacements
         private string PerformEmojiReplacements(string inputText)
         {
-            string modifiedText = inputText; // Start with the input text
-            foreach (var emoji in emojis)
-            {
-                // Replace all occurrences of the key with the value
-                modifiedText = modifiedText.Replace(emoji.Key, emoji.Value);
-            }
-            return modifiedText; // Return the result
+            string modifiedText = inputText;
+            foreach (var emoji in emojis) { modifiedText = modifiedText.Replace(emoji.Key, emoji.Value); }
+            return modifiedText;
         }
 
-        // Handles the button click to toggle the feature's state
+        // Button click handler
         private void button1_Click(object sender, EventArgs e)
         {
-            emojiReplacementState = !emojiReplacementState; // Toggle the boolean state
-            UpdateUIState(); // Update the UI elements (label and button text)
+            emojiReplacementState = !emojiReplacementState;
+            UpdateUIState();
         }
 
-        // Updates the Label and Button text based on the current state
+        // UI Update handler
         private void UpdateUIState()
         {
             if (emojiReplacementState)
             {
-                label1.Text = "SmartEmojis are enabled! (Alt+`)"; // Update hotkey hint
+                label1.Text = "SmartEmojis are enabled! (CTRL+`)"; // Update hotkey hint
                 button1.Text = "Disable SmartEmojis";
             }
             else
@@ -231,29 +285,12 @@ namespace SmartTyper
             }
         }
 
-        // Clean up: Unregister the hotkey when the application closes
+        // Form closing handler
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            try
-            {
-                HotkeyManager.Current.Remove(HotkeyName);
-                Console.WriteLine("Hotkey unregistered successfully.");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error unregistering hotkey: {ex.Message}");
-                // Log or handle as needed, but usually safe to ignore on close
-            }
+            try { HotkeyManager.Current.Remove(HotkeyName); Console.WriteLine("Hotkey unregistered successfully."); }
+            catch (Exception ex) { Console.WriteLine($"Error unregistering hotkey: {ex.Message}"); }
             base.OnFormClosing(e);
         }
-
-        // Remove or comment out the old TextChanged handler and replaceAllEmojis if they only reference richTextBox1
-        // We no longer need the class-level richTextBoxText variable either
-        /*
-        string richTextBoxText = string.Empty; // No longer needed
-        private void replaceAllEmojis_OLD_UI_VERSION() { ... } // Old method not needed
-        private void richTextBox1_TextChanged(object sender, EventArgs e) { ... } // No longer needed for global
-        */
-
     }
 }
